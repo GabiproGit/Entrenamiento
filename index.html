@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Temporizador de Entrenamiento</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: #111827;
+      color: #f9fafb;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .panel {
+      background-color: #1f2937;
+      border: 1px solid #374151;
+      border-radius: 20px;
+      padding: 30px 24px;
+      width: 100%;
+      max-width: 360px;
+      text-align: center;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+    }
+    .serie-badge {
+      display: inline-block;
+      background: #374151;
+      color: #9ca3af;
+      padding: 4px 14px;
+      border-radius: 9999px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 14px;
+    }
+    .fase-nombre {
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: #38bdf8;
+      min-height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .tiempo {
+      font-size: 4.8rem;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+      margin: 14px 0;
+      user-select: none;
+    }
+    .tiempo.alerta {
+      color: #f87171;
+    }
+    .botones {
+      display: flex;
+      gap: 12px;
+      margin-top: 10px;
+    }
+    button {
+      flex: 1;
+      padding: 14px 0;
+      font-size: 1.1rem;
+      font-weight: 700;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    #btn-iniciar {
+      background-color: #38bdf8;
+      color: #0f172a;
+    }
+    #btn-reiniciar {
+      background-color: #4b5563;
+      color: #f9fafb;
+    }
+    button:active {
+      transform: scale(0.98);
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="panel">
+    <div class="serie-badge" id="txt-serie">Serie 1 de 3</div>
+    <div class="fase-nombre" id="txt-fase">Ejercicio: Lado A</div>
+    <div class="tiempo" id="txt-tiempo">01:30</div>
+
+    <div class="botones">
+      <button type="button" id="btn-iniciar">Iniciar</button>
+      <button type="button" id="btn-reiniciar">Reiniciar</button>
+    </div>
+  </div>
+
+  <script>
+    window.addEventListener('DOMContentLoaded', () => {
+      // 1. Elementos del DOM
+      const txtSerie = document.getElementById('txt-serie');
+      const txtFase = document.getElementById('txt-fase');
+      const txtTiempo = document.getElementById('txt-tiempo');
+      const btnIniciar = document.getElementById('btn-iniciar');
+      const btnReiniciar = document.getElementById('btn-reiniciar');
+
+      // 2. Definición de fases
+      const FASES = [
+        { nombre: 'Ejercicio: Lado A', seg: 90, tonoSeg: 3.0, tonoFreq: 523.25 },
+        { nombre: 'Cambio de lado', seg: 10, tonoSeg: 1.5, tonoFreq: 440.00 },
+        { nombre: 'Ejercicio: Lado B', seg: 90, tonoSeg: 1.5, tonoFreq: 523.25 },
+        { nombre: 'Descanso entre series', seg: 40, tonoSeg: 3.0, tonoFreq: 392.00 }
+      ];
+
+      let serieActual = 1;
+      let indiceFase = 0;
+      let segundosRestantes = FASES[0].seg;
+      let intervaloId = null;
+      let audioCtx = null;
+
+      // 3. Sistema de Sonido Seguro
+      function sonar(duracion, freqBase) {
+        try {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          if (!AudioContextClass) return;
+
+          if (!audioCtx) {
+            audioCtx = new AudioContextClass();
+          }
+          if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+          }
+
+          const t = audioCtx.currentTime;
+          // Tono suave con armónicos (estilo campana / cuenco)
+          [1, 2].forEach((multiplicador, idx) => {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            const vol = idx === 0 ? 0.25 : 0.08;
+
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freqBase * multiplicador, t);
+
+            gain.gain.setValueAtTime(0.001, t);
+            gain.gain.linearRampToValueAtTime(vol, t + 0.05);
+            gain.gain.exponentialRampToValueAtTime(0.001, t + duracion);
+
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            osc.start(t);
+            osc.stop(t + duracion);
+          });
+        } catch (err) {
+          console.warn('Audio no disponible o bloqueado:', err);
+        }
+      }
+
+      function sonarBeepCorto() {
+        try {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          if (!AudioContextClass) return;
+          if (!audioCtx) audioCtx = new AudioContextClass();
+          if (audioCtx.state === 'suspended') audioCtx.resume();
+
+          const t = audioCtx.currentTime;
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(440, t);
+
+          gain.gain.setValueAtTime(0.12, t);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+
+          osc.start(t);
+          osc.stop(t + 0.12);
+        } catch (err) {
+          console.warn('Aviso 3-2-1 no disponible:', err);
+        }
+      }
+
+      // 4. Actualización Visual
+      function actualizarPantalla() {
+        txtSerie.textContent = `Serie ${serieActual} de 3`;
+        txtFase.textContent = FASES[indiceFase].nombre;
+
+        const m = String(Math.floor(segundosRestantes / 60)).padStart(2, '0');
+        const s = String(segundosRestantes % 60).padStart(2, '0');
+        txtTiempo.textContent = `${m}:${s}`;
+
+        if (segundosRestantes <= 3 && segundosRestantes > 0) {
+          txtTiempo.classList.add('alerta');
+        } else {
+          txtTiempo.classList.remove('alerta');
+        }
+      }
+
+      // 5. Lógica del Reloj
+      function paso() {
+        if (segundosRestantes > 0) {
+          if (segundosRestantes <= 3) {
+            sonarBeepCorto();
+          }
+          segundosRestantes--;
+          actualizarPantalla();
+        } else {
+          // Cambio de fase
+          indiceFase++;
+          if (indiceFase >= FASES.length) {
+            indiceFase = 0;
+            serieActual++;
+          }
+
+          if (serieActual > 3) {
+            // Fin entrenamiento
+            clearInterval(intervaloId);
+            intervaloId = null;
+            txtFase.textContent = '¡Entrenamiento completado!';
+            btnIniciar.textContent = 'Iniciar';
+            sonar(3.0, 659.25);
+            return;
+          }
+
+          const faseActual = FASES[indiceFase];
+          segundosRestantes = faseActual.seg;
+          sonar(faseActual.tonoSeg, faseActual.tonoFreq);
+          actualizarPantalla();
+        }
+      }
+
+      // 6. Control de Botones
+      btnIniciar.addEventListener('click', () => {
+        if (intervaloId) {
+          // Pausar
+          clearInterval(intervaloId);
+          intervaloId = null;
+          btnIniciar.textContent = 'Reanudar';
+        } else {
+          // Iniciar / Reanudar
+          if (segundosRestantes === FASES[indiceFase].seg) {
+            sonar(FASES[indiceFase].tonoSeg, FASES[indiceFase].tonoFreq);
+          }
+          intervaloId = setInterval(paso, 1000);
+          btnIniciar.textContent = 'Pausar';
+        }
+      });
+
+      btnReiniciar.addEventListener('click', () => {
+        if (intervaloId) {
+          clearInterval(intervaloId);
+          intervaloId = null;
+        }
+        serieActual = 1;
+        indiceFase = 0;
+        segundosRestantes = FASES[0].seg;
+        btnIniciar.textContent = 'Iniciar';
+        actualizarPantalla();
+      });
+
+      // Render inicial
+      actualizarPantalla();
+    });
+  </script>
+</body>
+</html>
+
+<link rel="manifest" href="manifest.json">
+
